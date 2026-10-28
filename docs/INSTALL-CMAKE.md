@@ -360,6 +360,7 @@ Details via CMake
                                             Requires debug-enabled build and DWARF debug information. Default: `OFF`
 - `CURL_USE_LIBPSL`:                        Use libpsl. Default: `ON`
 - `CURL_USE_LIBSSH2`:                       Use libssh2. Default: `ON`
+- `CURL_USE_SQLITE`:                        Use SQLite for the cookie database. Default: `OFF`
 - `CURL_USE_LIBSSH`:                        Use libssh. Default: `OFF`
 - `CURL_USE_LIBUV`:                         Use libuv for event-based tests. Default: `OFF`
 - `CURL_USE_MBEDTLS`:                       Enable mbedTLS for SSL/TLS. Default: `OFF`

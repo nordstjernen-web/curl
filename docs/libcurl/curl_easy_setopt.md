@@ -195,6 +195,10 @@ See CURLOPT_CONV_TO_NETWORK_FUNCTION(3)
 
 Cookie(s) to send. See CURLOPT_COOKIE(3)
 
+## CURLOPT_COOKIEDB
+
+SQLite database to keep cookies in. See CURLOPT_COOKIEDB(3)
+
 ## CURLOPT_COOKIEFILE
 
 File to read cookies from. See CURLOPT_COOKIEFILE(3)
