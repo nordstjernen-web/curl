@@ -578,6 +578,7 @@ Nagle
 NAMELOOKUP
 Natively
 NATs
+navigations
 nc
 NCR
 NDK
@@ -714,6 +715,7 @@ Redox
 reentrant
 Referer
 referer
+registrable
 reinitializes
 Relatedly
 repo
@@ -757,11 +759,13 @@ Rustls
 rustls
 rustup
 Sagula
+SameSite
 SanDisk
 SAS
 SASL
 Satiro
 Schannel
+schemeful
 Schindelin
 SCO
 SCP
@@ -852,7 +856,9 @@ Structs
 stunnel
 subdirectories
 subdirectory
+subframe
 submitters
+subresource
 substring
 substrings
 sudo
