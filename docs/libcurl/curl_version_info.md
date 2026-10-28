@@ -312,6 +312,13 @@ feature was removed from curl in 8.8.0.
 libcurl was built with EXPERIMENTAL support for HTTP/3 proxy tunneling
 (Added in 8.21.0)
 
+## `SQLite`
+
+*features* mask bit: non-existent
+
+libcurl was built with SQLite and can keep cookies in a database with
+CURLOPT_COOKIEDB(3). (Added in 8.24.0)
+
 ## `PSL`
 
 *features* mask bit: CURL_VERSION_PSL

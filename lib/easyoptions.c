@@ -61,6 +61,7 @@ const struct curl_easyoption Curl_easyopts[] = {
   { "CONV_TO_NETWORK_FUNCTION", CURLOPT_CONV_TO_NETWORK_FUNCTION,
     CURLOT_FUNCTION, 0 },
   { "COOKIE", CURLOPT_COOKIE, CURLOT_STRING, 0 },
+  { "COOKIEDB", CURLOPT_COOKIEDB, CURLOT_STRING, 0 },
   { "COOKIEFILE", CURLOPT_COOKIEFILE, CURLOT_STRING, 0 },
   { "COOKIEJAR", CURLOPT_COOKIEJAR, CURLOT_STRING, 0 },
   { "COOKIELIST", CURLOPT_COOKIELIST, CURLOT_STRING, 0 },
@@ -391,6 +392,6 @@ const struct curl_easyoption Curl_easyopts[] = {
  */
 int Curl_easyopts_check(void)
 {
-  return (CURLOPT_LASTENTRY % 10000) != (336 + 1);
+  return (CURLOPT_LASTENTRY % 10000) != (337 + 1);
 }
 #endif
