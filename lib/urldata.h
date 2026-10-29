@@ -161,14 +161,6 @@ struct digestdata {
 };
 #endif
 
-typedef enum {
-  NTLMSTATE_NONE,
-  NTLMSTATE_TYPE1,
-  NTLMSTATE_TYPE2,
-  NTLMSTATE_TYPE3,
-  NTLMSTATE_LAST
-} curlntlm;
-
 #define CURL_NEGO_AUTH_NONE   0U
 #define CURL_NEGO_AUTH_RECV   1U
 #define CURL_NEGO_AUTH_SENT   2U
@@ -323,11 +315,6 @@ struct connectdata {
   /*************** Request - specific items ************/
 #ifdef USE_WINDOWS_SSPI
   CtxtHandle *sslContext;
-#endif
-
-#ifdef USE_NTLM
-  curlntlm http_ntlm_state;
-  curlntlm proxy_ntlm_state;
 #endif
 
   /* When this connection is created, store the conditions for the local end
@@ -712,6 +699,7 @@ enum dupstring {
 #endif
 #ifndef CURL_DISABLE_COOKIES
   STRING_COOKIE,          /* HTTP cookie string to send */
+  STRING_COOKIE_SITE,     /* site the request is made for, for SameSite */
   STRING_COOKIEJAR,       /* dump all cookies to this file */
 #endif
   STRING_CUSTOMREQUEST,   /* HTTP/FTP/RTSP request/method to use */
@@ -1037,6 +1025,7 @@ struct UserDefined {
   BIT(sep_headers);     /* handle host and proxy headers separately */
 #ifndef CURL_DISABLE_COOKIES
   BIT(cookiesession);   /* new cookie session? */
+  BIT(cookie_navigation); /* request is a top-level navigation */
 #endif
   BIT(crlf);            /* convert crlf on ftp upload(?) */
 #ifdef USE_SSH

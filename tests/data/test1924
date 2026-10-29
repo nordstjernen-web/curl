@@ -3,16 +3,18 @@
 <info>
 <keywords>
 unittest
-MD4
+cookies
+SameSite
 </keywords>
 </info>
 
 <client>
 <features>
 unittest
+cookies
 </features>
 <name>
-MD4 unit tests
+cookie same-site check for CURLOPT_COOKIE_SITE
 </name>
 </client>
 </testcase>
