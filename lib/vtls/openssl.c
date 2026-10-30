@@ -1914,10 +1914,24 @@ static CURLcode ossl_shutdown(struct Curl_cfilter *cf,
       *done = TRUE;
       goto out;
     }
-    if(SSL_get_error(octx->ssl, rc) == SSL_ERROR_WANT_WRITE) {
-      CURL_TRC_CF(data, cf, "SSL shutdown still wants to send");
-      connssl->io_need = CURL_SSL_IO_NEED_SEND;
-      goto out;
+    if(rc < 0) {
+      err = SSL_get_error(octx->ssl, rc);
+      if(err == SSL_ERROR_WANT_WRITE) {
+        CURL_TRC_CF(data, cf, "SSL shutdown still wants to send");
+        connssl->io_need = CURL_SSL_IO_NEED_SEND;
+        goto out;
+      }
+      if(err != SSL_ERROR_WANT_READ) {
+        VERBOSE(unsigned long sslerr = ERR_get_error());
+        CURL_TRC_CF(data, cf,
+                    "SSL shutdown, ignore send error: %s (%s), errno %d",
+                    SSL_ERROR_to_str(err),
+                    (sslerr ? ossl_strerror(sslerr, buf, sizeof(buf)) :
+                     "no OpenSSL error"),
+                    SOCKERRNO);
+        *done = TRUE;
+        goto out;
+      }
     }
     /* Having sent the close notify, we use SSL_read() to get the
      * missing close notify from the server. */
@@ -2938,6 +2952,45 @@ static CURLcode ossl_win_load_store(struct Curl_easy *data,
       }
       else
         continue;
+
+      {
+        /* Blacklisted roots and intermediates.
+         * https://emudhra.we-have-a-problem.com/
+         *
+         * Microsoft blocked the bad eMudhra intermediate certificates in
+         * supported versions of Windows that receive updates, but may still
+         * trust the issuer root certificates which other vendors have removed.
+         *
+         * Regardless we skip importing these certificates. OpenSSL does not
+         * check Microsoft's blacklist and assuming the user did not provide a
+         * CRL file it would otherwise be possible for verification to succeed.
+         */
+        static const char * const blacklist[] = {
+          "emSign Root TLS CA - G3",
+          "emSign Root CS CA - G3",
+          "AAA Certificate Services",
+          "emSign ECC Root CA - G3",
+          "EM DV TLS CA - G3B",
+          "EM OV TLS CA - G3B",
+          "EM EV TLS CA - G3B",
+          "EM DV TLS CA - G3C",
+          "EM OV TLS CA - G3C",
+          "EM EV TLS CA - G3C",
+          "EM OV CS CA - G3B",
+          "EM OV CS CA - G3C",
+          NULL
+        };
+        char cert_name[256];
+        if(CertGetNameStringA(pContext, CERT_NAME_ATTR_TYPE, 0,
+                              CURL_UNCONST(szOID_COMMON_NAME),
+                              cert_name, sizeof(cert_name)) > 1) {
+          const char * const *b;
+          for(b = blacklist; *b && strcmp(cert_name, *b); ++b)
+            ;
+          if(*b)
+            continue;
+        }
+      }
 
       x509 = d2i_X509(NULL, &encoded_cert, (long)pContext->cbCertEncoded);
       if(!x509)
