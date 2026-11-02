@@ -161,14 +161,6 @@ struct digestdata {
 };
 #endif
 
-typedef enum {
-  NTLMSTATE_NONE,
-  NTLMSTATE_TYPE1,
-  NTLMSTATE_TYPE2,
-  NTLMSTATE_TYPE3,
-  NTLMSTATE_LAST
-} curlntlm;
-
 #define CURL_NEGO_AUTH_NONE   0U
 #define CURL_NEGO_AUTH_RECV   1U
 #define CURL_NEGO_AUTH_SENT   2U
@@ -323,11 +315,6 @@ struct connectdata {
   /*************** Request - specific items ************/
 #ifdef USE_WINDOWS_SSPI
   CtxtHandle *sslContext;
-#endif
-
-#ifdef USE_NTLM
-  curlntlm http_ntlm_state;
-  curlntlm proxy_ntlm_state;
 #endif
 
   /* When this connection is created, store the conditions for the local end
@@ -972,6 +959,7 @@ struct UserDefined {
   /* Priority information for an easy handle in relation to others on the same
      connection. */
   int weight;
+  signed char priority_urgency; /* RFC 9218 urgency, 0 - 7, -1 for unset */
 #endif
   short maxredirs;    /* maximum no. of http(s) redirects to follow,
                          set to -1 for infinity */
@@ -1037,6 +1025,9 @@ struct UserDefined {
   BIT(sep_headers);     /* handle host and proxy headers separately */
 #ifndef CURL_DISABLE_COOKIES
   BIT(cookiesession);   /* new cookie session? */
+#endif
+#if defined(USE_HTTP2) || defined(USE_HTTP3)
+  BIT(priority_incremental); /* RFC 9218 incremental flag */
 #endif
   BIT(crlf);            /* convert crlf on ftp upload(?) */
 #ifdef USE_SSH
