@@ -26,6 +26,8 @@ SSL
 !Schannel
 !GnuTLS
 local-http
+!libressl-4.4.0
+sha256
 </features>
 <server>
 https-mtls

@@ -34,15 +34,27 @@ struct Cookie {
   char *value;                    /* name = <this> */
   char *path;                     /* canonical path */
   char *domain;                   /* domain = <this> */
+  char *partkey;                  /* partition key of a Partitioned cookie,
+                                     the "scheme://host" it was set under,
+                                     stored in 'buf', else NULL */
   curl_off_t expires;             /* expires = <this> */
   unsigned int creationtime;      /* time when the cookie was written */
+  unsigned char samesite;         /* COOKIE_SAMESITE_* */
   BIT(tailmatch);                 /* tail-match the domain name */
   BIT(secure);                    /* the 'secure' keyword was used */
-  BIT(livecookie);                /* updated from server, not a stored file */
+  BIT(livecookie);                /* from a server or API, not a stored file */
   BIT(httponly);                  /* the httponly directive is present */
   BIT(prefix_secure);             /* secure prefix is set */
   BIT(prefix_host);               /* host prefix is set */
+  char buf[1];                    /* storage area for
+                                     name+value+path+domain */
 };
+
+/* SameSite attribute values, RFC 6265bis section 5.4.7 */
+#define COOKIE_SAMESITE_DEFAULT 0 /* no (valid) attribute, treated as Lax */
+#define COOKIE_SAMESITE_NONE    1
+#define COOKIE_SAMESITE_LAX     2
+#define COOKIE_SAMESITE_STRICT  3
 
 /*
  * Available cookie prefixes, as defined in
@@ -59,8 +71,13 @@ struct CookieInfo {
   curl_off_t next_expiration; /* the next time at which expiration happens */
   unsigned int numcookies;    /* number of cookies in the "jar" */
   unsigned int lastct;        /* last creation-time used in the jar */
+  /* attributes read from a "#curl:" line, applied to the next cookie line */
+  char *pending_partkey;
+  unsigned char pending_samesite;
+  BIT(pending);               /* a "#curl:" line was read */
+  BIT(attrs_used);            /* SameSite/Partitioned attributes are in use,
+                                 write them to the jar */
   BIT(running);               /* state info, for cookie adding information */
-  BIT(newsession); /* new session, discard session cookies on load */
 };
 
 /* The maximum sizes we accept for cookies. RFC 6265 section 6.1 says
@@ -104,7 +121,8 @@ struct CookieInfo {
 struct Curl_easy;
 struct connectdata;
 
-bool Curl_secure_context(struct Curl_easy *data, const char *host);
+bool Curl_secure_context(struct Curl_easy *data, const char *host,
+                         const size_t hlen);
 
 /*
  * Add a cookie to the internal list of cookies. The domain and path arguments
@@ -112,7 +130,7 @@ bool Curl_secure_context(struct Curl_easy *data, const char *host);
  */
 
 #define COOKIE_HTTPHEADER (1<<0) /* if HTTP header-style line */
-#define COOKIE_NOEXPIRE   (1<<1) /* skip remove_expired() */
+#define COOKIE_LIVE       (1<<1) /* from a server or API */
 #define COOKIE_SECURE     (1<<2) /* connection is over secure origin */
 #define COOKIE_NOPSL      (1<<3) /* skip PSL check */
 #define COOKIE_NOSESSION  (1<<6) /* drop session cookies */
@@ -124,7 +142,7 @@ CURLcode Curl_cookie_add(struct Curl_easy *data,
                          const char *path,
                          const int flags) WARN_UNUSED_RESULT;
 CURLcode Curl_cookie_getlist(struct Curl_easy *data,
-                             bool *okay, const char *host,
+                             bool *okay, const char *hostp,
                              struct Curl_llist *list) WARN_UNUSED_RESULT;
 void Curl_cookie_clearall(struct CookieInfo *ci);
 void Curl_cookie_clearsess(struct CookieInfo *ci);
@@ -136,7 +154,9 @@ void Curl_cookie_clearsess(struct CookieInfo *ci);
 #define Curl_cookie_run(x)       Curl_nop_stmt
 #define Curl_cookie_cleanup(x)   Curl_nop_stmt
 #define Curl_flush_cookies(x, y) Curl_nop_stmt
+#define Curl_cookie_site_ok(x)   TRUE
 #else
+bool Curl_cookie_site_ok(const char *site);
 void Curl_flush_cookies(struct Curl_easy *data, bool cleanup);
 void Curl_cookie_cleanup(struct CookieInfo *ci);
 struct CookieInfo *Curl_cookie_init(void);

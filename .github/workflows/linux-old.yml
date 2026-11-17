@@ -49,14 +49,14 @@ cache-mode: none
 env:
   MAKEFLAGS: -j 5
   CURL_CI: github
-  CURL_TEST_MIN: 1680
+  CURL_TEST_MIN: 1640
   DEBIAN_FRONTEND: noninteractive
   DO_NOT_TRACK: '1'
 
 jobs:
   cmake-autotools:
     name: 'autotools & cmake'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     container: debian:stretch-20220622-slim@sha256:c5cd3ffceeb25b683bf5111ea89bf8049a177e00fb237235d48076a19cc80097  # manually bumped (oldest supported Debian major version, rule disabled)
 
     steps:

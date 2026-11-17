@@ -69,6 +69,10 @@ class TestSSLUse:
         env.make_data_file(indir=httpd.docs_dir, fname="data-10k", fsize=10 * 1024)
 
     def test_17_01_sslinfo_plain(self, env: Env, httpd):
+        if env.curl_uses_lib('libressl') and \
+           env.curl_lib_version_at_least('libressl', '4.4.0') and \
+           env.curl_lib_version_before('libressl', '4.4.2'):
+            pytest.skip('LibreSSL 4.4.0-4.4.1 skipped due to missing SSL_SESSION_ID with OpenSSL 4.1.0+-based servers')
         proto = 'http/1.1'
         curl = CurlClient(env=env)
         url = f'https://{env.authority_for(env.domain1, proto)}/curltest/sslinfo'
@@ -435,7 +439,7 @@ class TestSSLUse:
         exp_trace = None
         match_trace = None
         if env.curl_uses_lib('openssl') or env.curl_uses_lib('quictls'):
-            exp_trace = r'.*SSL certificate OpenSSL verify result: certificate has expired.*$'
+            exp_trace = r'.*SSL certificate problem: certificate has expired*$'
         elif env.curl_uses_lib('gnutls'):
             exp_trace = r'.*SSL certificate verification failed: certificate has expired\..*'
         elif env.curl_uses_lib('wolfssl'):
@@ -458,6 +462,8 @@ class TestSSLUse:
         if env.curl_uses_lib('mbedtls') and \
            not env.curl_lib_version_at_least('mbedtls', '3.6.0'):
             pytest.skip('mbedtls TLSv1.3 session resume not working before 3.6.0')
+        if not env.curl_has_sha256():
+            pytest.skip(reason="curl built without SHA-256")
         run_env = os.environ.copy()
         run_env['CURL_DEBUG'] = 'ssl,ssls'
         # clean session file first, then reuse

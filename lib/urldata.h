@@ -56,6 +56,7 @@
 #include "api.h"
 #include "cookie.h"
 #include "creds.h"
+#include "cfilters.h"
 #include "psl.h"
 #include "formdata.h"
 #include "http_chunks.h" /* for the structs and enum stuff */
@@ -76,7 +77,6 @@
 
 /* On error return, the value of `pnwritten` has no meaning */
 typedef CURLcode (Curl_send)(struct Curl_easy *data,   /* transfer */
-                             int8_t sockindex,            /* socketindex */
                              const uint8_t *buf,       /* data to write */
                              size_t len,               /* amount to send */
                              bool eos,                 /* last chunk */
@@ -84,7 +84,6 @@ typedef CURLcode (Curl_send)(struct Curl_easy *data,   /* transfer */
 
 /* On error return, the value of `pnread` has no meaning */
 typedef CURLcode (Curl_recv)(struct Curl_easy *data,   /* transfer */
-                             int8_t sockindex,            /* socketindex */
                              char *buf,                /* store data here */
                              size_t len,               /* max amount to read */
                              size_t *pnread);          /* how much received */
@@ -161,14 +160,6 @@ struct digestdata {
 };
 #endif
 
-typedef enum {
-  NTLMSTATE_NONE,
-  NTLMSTATE_TYPE1,
-  NTLMSTATE_TYPE2,
-  NTLMSTATE_TYPE3,
-  NTLMSTATE_LAST
-} curlntlm;
-
 #define CURL_NEGO_AUTH_NONE   0U
 #define CURL_NEGO_AUTH_RECV   1U
 #define CURL_NEGO_AUTH_SENT   2U
@@ -182,13 +173,14 @@ struct ConnectBits {
   BIT(connect_only);
 #ifndef CURL_DISABLE_PROXY
   BIT(origin_is_proxy);  /* if set, the connection's origin is a proxy */
-  BIT(socks5_authenticated); /* SOCKS5 authenticated on FIRSTSOCKET */
+  BIT(socks5_authenticated); /* SOCKS5 authenticated */
 #endif
+  BIT(want_recv);
+  BIT(want_send);
   /* always modify bits.close with the connclose() and connkeep() macros! */
   BIT(close); /* if set, we close the connection after this request */
   BIT(reuse); /* if set, this is a reused connection */
   BIT(altused); /* this is an alt-svc "redirect" */
-  BIT(ipv6);    /* we communicate with a site using an IPv6 address */
   BIT(do_more); /* this is set TRUE if the ->curl_do_more() function is
                    supposed to be called, after ->curl_do() */
   BIT(protoconnstart);/* the protocol layer has STARTED its operation after
@@ -227,9 +219,6 @@ struct hostname {
   char *name;     /* name to use internally, might be encoded, might be raw */
   const char *dispname; /* name to display, as 'name' might be encoded */
 };
-
-#define FIRSTSOCKET     0
-#define SECONDARYSOCKET 1
 
 #define TRNSPRT_NONE 0
 #define TRNSPRT_TCP  3
@@ -297,19 +286,13 @@ struct connectdata {
   struct proxy_info http_proxy;
 #endif
 
-  /* A connection can have one or two sockets and connection filters.
-   * The protocol using the 2nd one is FTP for CONTROL+DATA sockets */
-  struct Curl_cfilter *cfilter[2]; /* connection filters */
-  Curl_recv *recv[2];
-  Curl_send *send[2];
-  curl_socket_t sock[2];
+  /* Callbacks for send/recv, can be overwritten by protocol handlers.
+   * Default to operations on connection's primary filter chain. */
+  struct Curl_cfchain chain; /* primary filter chain */
+  Curl_recv *do_recv;
+  Curl_send *do_send;
 
 #define CONN_SOCK_IDX_VALID(i)    (((i) >= 0) && ((i) < 2))
-
-  struct {
-    timediff_t start_ms[2]; /* when filter shutdown started */
-    timediff_t timeout_ms; /* 0 means no timeout */
-  } shutdown;
 
   curl_closesocket_callback fclosesocket; /* function closing the socket(s) */
   void *closesocket_client;
@@ -323,11 +306,6 @@ struct connectdata {
   /*************** Request - specific items ************/
 #ifdef USE_WINDOWS_SSPI
   CtxtHandle *sslContext;
-#endif
-
-#ifdef USE_NTLM
-  curlntlm http_ntlm_state;
-  curlntlm proxy_ntlm_state;
 #endif
 
   /* When this connection is created, store the conditions for the local end
@@ -355,8 +333,6 @@ struct connectdata {
 #endif
   uint16_t localportrange;
   uint16_t localport;
-  int8_t recv_idx;  /* on which socket index to receive, default 0 */
-  int8_t send_idx;  /* on which socket index to send, default 0 */
   uint8_t transport_wanted; /* one of the TRNSPRT_* defines. Not necessarily
    the transport the connection ends using due to Alt-Svc and happy
    eyeballing. Use Curl_conn_get_transport() for actual value once the
@@ -712,6 +688,7 @@ enum dupstring {
 #endif
 #ifndef CURL_DISABLE_COOKIES
   STRING_COOKIE,          /* HTTP cookie string to send */
+  STRING_COOKIESITE,      /* site the request is made for, for SameSite */
   STRING_COOKIEJAR,       /* dump all cookies to this file */
 #endif
   STRING_CUSTOMREQUEST,   /* HTTP/FTP/RTSP request/method to use */
@@ -1037,6 +1014,7 @@ struct UserDefined {
   BIT(sep_headers);     /* handle host and proxy headers separately */
 #ifndef CURL_DISABLE_COOKIES
   BIT(cookiesession);   /* new cookie session? */
+  BIT(cookie_navigation); /* request is a top-level navigation */
 #endif
   BIT(crlf);            /* convert crlf on ftp upload(?) */
 #ifdef USE_SSH
@@ -1128,6 +1106,7 @@ struct UserDefined {
 #ifdef USE_OPENSSL
   BIT(engine_default);
 #endif
+  BIT(never_retry);    /* No matter what, never retry this transfer */
 };
 
 #ifndef CURL_DISABLE_MIME

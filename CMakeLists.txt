@@ -493,8 +493,6 @@ option(CURL_DISABLE_BINDLOCAL "Disable local binding support" OFF)
 mark_as_advanced(CURL_DISABLE_BINDLOCAL)
 option(CURL_DISABLE_NETRC "Disable netrc parser" OFF)
 mark_as_advanced(CURL_DISABLE_NETRC)
-option(CURL_ENABLE_NTLM "Enable NTLM support" OFF)
-mark_as_advanced(CURL_ENABLE_NTLM)
 option(CURL_DISABLE_PARSEDATE "Disable date parsing" OFF)
 mark_as_advanced(CURL_DISABLE_PARSEDATE)
 option(CURL_DISABLE_POP3 "Disable POP3" OFF)
@@ -853,6 +851,8 @@ if(CURL_USE_OPENSSL)
   cmake_pop_check_state()
 
   unset(AWSLC_VERSION CACHE)
+  unset(LIBRESSL_VERSION CACHE)
+
   if(HAVE_AWSLC)
     get_target_property(_awslc_include_dir OpenSSL::Crypto INTERFACE_INCLUDE_DIRECTORIES)
     if(_awslc_include_dir AND EXISTS "${_awslc_include_dir}/openssl/base.h")
@@ -864,6 +864,17 @@ if(CURL_USE_OPENSSL)
       unset(_version_str)
     endif()
     message(STATUS "Found AWS-LC version \"${AWSLC_VERSION}\"")
+  elseif(HAVE_LIBRESSL)
+    get_target_property(_libressl_include_dir OpenSSL::Crypto INTERFACE_INCLUDE_DIRECTORIES)
+    if(_libressl_include_dir AND EXISTS "${_libressl_include_dir}/openssl/opensslv.h")
+      set(_version_regex "#[\t ]*define[\t ]+LIBRESSL_VERSION_TEXT[\t ]+\"LibreSSL ([0-9.]+)\"")
+      file(STRINGS "${_libressl_include_dir}/openssl/opensslv.h" _version_str REGEX "${_version_regex}")
+      string(REGEX REPLACE "${_version_regex}" "\\1" _version_str "${_version_str}")
+      set(LIBRESSL_VERSION "${_version_str}")
+      unset(_version_regex)
+      unset(_version_str)
+    endif()
+    message(STATUS "Found LibreSSL version \"${LIBRESSL_VERSION}\"")
   endif()
 
   if(HAVE_AWSLC OR HAVE_BORINGSSL)
@@ -896,8 +907,14 @@ if(CURL_USE_OPENSSL)
     set(_openssl "BoringSSL")
   elseif(HAVE_LIBRESSL)
     set(_openssl "LibreSSL")
+    if(LIBRESSL_VERSION AND LIBRESSL_VERSION VERSION_LESS 3.4.1)
+      message(FATAL_ERROR "LibreSSL 3.4.1 or greater required")
+    endif()
   else()
     set(_openssl "OpenSSL")
+    if(OPENSSL_VERSION VERSION_LESS 3.0.0)
+      message(FATAL_ERROR "OpenSSL 3.0.0 or greater required")
+    endif()
   endif()
 endif()
 
@@ -951,6 +968,10 @@ if(CURL_USE_GNUTLS)
   list(APPEND CURL_LIBS CURL::nettle)
   set(_ssl_enabled ON)
   set(USE_GNUTLS ON)
+
+  if(GNUTLS_VERSION VERSION_LESS 3.6.5)
+    message(FATAL_ERROR "GnuTLS 3.6.5 or greater required")
+  endif()
 
   if(CURL_DEFAULT_SSL_BACKEND AND CURL_DEFAULT_SSL_BACKEND STREQUAL "gnutls")
     set(_valid_default_ssl_backend TRUE)
@@ -1081,7 +1102,6 @@ if(USE_WOLFSSL)
   curl_openssl_check_exists("wolfSSL_UseALPN" HAVE_WOLFSSL_USEALPN)
   curl_openssl_check_exists("wolfSSL_BIO_new" HAVE_WOLFSSL_BIO_NEW)
   curl_openssl_check_exists("wolfSSL_BIO_set_shutdown" HAVE_WOLFSSL_BIO_SET_SHUTDOWN)
-  curl_openssl_check_exists("wc_Des_EcbEncrypt" HAVE_WC_DES_ECBENCRYPT)
 endif()
 
 if(USE_OPENSSL)
@@ -1488,6 +1508,7 @@ if(_curl_ca_bundle_supported)
 
     if(_curl_ca_bundle_autodetect)
       foreach(_search_ca_bundle_path IN ITEMS
+          "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
           "/etc/ssl/certs/ca-certificates.crt"
           "/etc/pki/tls/certs/ca-bundle.crt"
           "/usr/share/ssl/certs/ca-bundle.crt"
@@ -1528,7 +1549,9 @@ if(_curl_ca_bundle_supported)
 endif()
 
 if(WIN32)
-  option(CURL_DISABLE_CA_SEARCH "Disable unsafe CA bundle search in PATH on Windows" ${_curl_disable_ca_search_default})
+  if(NOT WINDOWS_STORE)
+    option(CURL_DISABLE_CA_SEARCH "Disable unsafe CA bundle search in PATH on Windows" ${_curl_disable_ca_search_default})
+  endif()
   option(CURL_CA_SEARCH_SAFE "Enable safe CA bundle search (within the curl tool directory) on Windows" OFF)
 endif()
 
@@ -1697,7 +1720,6 @@ else()
   # Apple SDK <27 do not offer pipe2(), but the iPhone Simulator-specific
   # /usr/lib/system/libsystem_sim_kernel.dylib exports it. To avoid false
   # detection, omit this feature check for Apple targets.
-  # For 27+, detection is done in-source.
   check_function_exists("pipe2"         HAVE_PIPE2)
 endif()
 
@@ -1717,7 +1739,10 @@ if(NOT WIN32)
 
   check_symbol_exists("memset_s" "string.h" HAVE_MEMSET_S)
   if(NOT HAVE_MEMSET_S)
-    check_function_exists("memset_explicit" HAVE_MEMSET_EXPLICIT)
+    check_symbol_exists("explicit_bzero" "string.h" HAVE_EXPLICIT_BZERO)
+    if(NOT HAVE_EXPLICIT_BZERO)
+      check_function_exists("memset_explicit" HAVE_MEMSET_EXPLICIT)
+    endif()
   endif()
 endif()
 
@@ -1862,7 +1887,9 @@ if(WIN32)
   if(NOT WINDOWS_STORE)
     list(APPEND CURL_NETWORK_AND_TIME_LIBS "iphlpapi")  # for if_nametoindex()
   endif()
-  list(APPEND CURL_LIBS "bcrypt")  # for BCryptGenRandom()
+  # for BCryptCloseAlgorithmProvider(), BCryptCreateHash(), BCryptDestroyHash(), BCryptFinishHash(),
+  #     BCryptGenRandom(), BCryptGetProperty(), BCryptHashData(), BCryptOpenAlgorithmProvider()
+  list(APPEND CURL_LIBS "bcrypt")
 
   # We use crypto functions that are not available for UWP apps
   if(NOT WINDOWS_STORE)
@@ -1871,10 +1898,6 @@ if(WIN32)
 
   # Link required libraries for USE_WIN32_CRYPTO or USE_SCHANNEL
   if(USE_WIN32_CRYPTO OR USE_SCHANNEL)
-    # for CryptAcquireContext(), CryptCreateHash(), CryptDestroyHash(), CryptGetHashParam(), CryptHashData(),
-    #     CryptReleaseContext() in NTLM, md4, md5, sha256, Schannel
-    # for CryptDestroyKey(), CryptEncrypt(), CryptImportKey() in NTLM
-    list(APPEND CURL_LIBS "advapi32")
     # for Cert*() in openssl.c Native CA, Schannel
     # for CryptDecodeObjectEx(), CryptQueryObject(), CryptStringToBinary(), PFXImportCertStore() in Schannel
     list(APPEND CURL_LIBS "crypt32")
@@ -1995,17 +2018,6 @@ macro(curl_add_if _label)
   endif()
 endmacro()
 
-# NTLM support requires crypto functions from various SSL libs.
-# These conditions must match those in lib/curl_setup.h.
-if(CURL_ENABLE_NTLM AND
-   ((USE_OPENSSL AND HAVE_DES_ECB_ENCRYPT) OR
-    (USE_MBEDTLS AND HAVE_MBEDTLS_DES_CRYPT_ECB) OR
-    USE_GNUTLS OR
-    USE_WIN32_CRYPTO OR
-    (USE_WOLFSSL AND HAVE_WC_DES_ECBENCRYPT)))
-  set(_use_curl_ntlm_core ON)
-endif()
-
 # Clear list and try to detect available protocols
 set(_items "")
 curl_add_if("HTTP"          NOT CURL_DISABLE_HTTP)
@@ -2070,8 +2082,6 @@ curl_add_if("SPNEGO"        NOT CURL_DISABLE_NEGOTIATE_AUTH AND
                             (HAVE_GSSAPI OR USE_WINDOWS_SSPI))
 curl_add_if("Kerberos"      NOT CURL_DISABLE_KERBEROS_AUTH AND
                             (HAVE_GSSAPI OR USE_WINDOWS_SSPI))
-curl_add_if("NTLM"          CURL_ENABLE_NTLM AND
-                            (_use_curl_ntlm_core OR USE_WINDOWS_SSPI))
 curl_add_if("HTTP2"         USE_NGHTTP2)
 curl_add_if("HTTP3"         USE_NGTCP2 OR USE_QUICHE)
 curl_add_if("proxy-HTTP3"   USE_PROXY_HTTP3)
