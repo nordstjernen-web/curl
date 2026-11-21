@@ -51,8 +51,8 @@ CURLcode Curl_req_soft_reset(struct SingleRequest *req,
   req->eos_written = FALSE;
   req->eos_read = FALSE;
   req->eos_sent = FALSE;
+  req->refused_stream = FALSE;
   req->ignorebody = FALSE;
-  req->shutdown = FALSE;
   req->bytecount = 0;
   req->writebytecount = 0;
   req->header = FALSE;
@@ -154,6 +154,7 @@ void Curl_req_hard_reset(struct SingleRequest *req, struct Curl_easy *data)
   req->eos_written = FALSE;
   req->eos_read = FALSE;
   req->eos_sent = FALSE;
+  req->refused_stream = FALSE;
   req->rewind_read = FALSE;
   req->upload_done = FALSE;
   req->upload_aborted = FALSE;
@@ -165,7 +166,6 @@ void Curl_req_hard_reset(struct SingleRequest *req, struct Curl_easy *data)
   req->upload_chunky = FALSE;
   req->no_body = data->set.opt_no_body;
   req->authneg = FALSE;
-  req->shutdown = FALSE;
   /* Unpause all directions */
   Curl_rlimit_block(&data->progress.dl.rlimit, FALSE, &t0);
   Curl_rlimit_block(&data->progress.ul.rlimit, FALSE, &t0);
@@ -221,7 +221,7 @@ static CURLcode xfer_send(struct Curl_easy *data,
     DEBUGF(infof(data, "sending last upload chunk of %zu bytes", blen));
     eos = TRUE;
   }
-  result = Curl_xfer_send(data, buf, blen, eos, pnwritten);
+  result = Curl_xfer_try_send(data, buf, blen, eos, pnwritten);
   if(!result) {
     if(eos && (blen == *pnwritten))
       data->req.eos_sent = TRUE;
@@ -275,7 +275,16 @@ static CURLcode req_set_upload_done(struct Curl_easy *data)
   Curl_creader_done(data, data->req.upload_aborted);
 
   if(data->req.upload_aborted) {
-    Curl_bufq_reset(&data->req.sendbuf);
+    /* If we have not already sent EOS, clear buffer and read flag,
+     * so we no longer flush anything. If EOS has been sent, our
+     * sendbuf should be empty. */
+    if(!data->req.eos_sent) {
+      Curl_bufq_reset(&data->req.sendbuf);
+      data->req.eos_read = FALSE;
+    }
+    else
+      DEBUGASSERT(Curl_bufq_is_empty(&data->req.sendbuf));
+
     if(data->req.writebytecount)
       infof(data, "abort upload after having sent %" FMT_OFF_T " bytes",
             data->req.writebytecount);
@@ -292,7 +301,7 @@ static CURLcode req_set_upload_done(struct Curl_easy *data)
           "Request completely sent off");
   }
 
-  return Curl_xfer_send_close(data);
+  return CURLE_OK;
 }
 
 static CURLcode req_flush(struct Curl_easy *data)
@@ -328,21 +337,6 @@ static CURLcode req_flush(struct Curl_easy *data)
 
   if(!data->req.upload_done && data->req.eos_read && data->req.eos_sent) {
     DEBUGASSERT(Curl_bufq_is_empty(&data->req.sendbuf));
-    if(data->req.shutdown) {
-      bool done;
-      result = Curl_xfer_send_shutdown(data, &done);
-      if(result && data->req.shutdown_err_ignore) {
-        infof(data, "Shutdown send direction error: %d. Broken server? "
-              "Proceeding as if everything is ok.", (int)result);
-        result = CURLE_OK;
-        done = TRUE;
-      }
-
-      if(result)
-        return result;
-      if(!done)
-        return CURLE_AGAIN;
-    }
     return req_set_upload_done(data);
   }
   return CURLE_OK;
@@ -380,7 +374,7 @@ static CURLcode req_send_buffer_add(struct Curl_easy *data,
 CURLcode Curl_req_send(struct Curl_easy *data, struct dynbuf *req,
                        unsigned char httpversion)
 {
-  CURLcode result;
+  CURLcode result = CURLE_OK;
   const char *buf;
   size_t blen, nwritten;
 
@@ -400,14 +394,20 @@ CURLcode Curl_req_send(struct Curl_easy *data, struct dynbuf *req,
      (blen <= data->req.sendbuf.chunk_size)) {
     data->req.eos_read = TRUE;
     result = xfer_send(data, buf, blen, blen, &nwritten);
-    if(result)
-      return result;
+    if(result) {
+      if(result == CURLE_AGAIN) {
+        nwritten = 0;
+        result = CURLE_OK;
+      }
+      else
+        goto out;
+    }
     buf += nwritten;
     blen -= nwritten;
     if(!blen) {
       result = req_set_upload_done(data);
       if(result)
-        return result;
+        goto out;
     }
   }
 
@@ -416,12 +416,12 @@ CURLcode Curl_req_send(struct Curl_easy *data, struct dynbuf *req,
      * request in one go. Buffer the remainder and try to add as much
      * body bytes as room is left in the buffer. Then flush. */
     result = req_send_buffer_add(data, buf, blen, blen);
-    if(result)
-      return result;
-
-    return Curl_req_send_more(data);
+    if(!result)
+      result = Curl_req_send_more(data);
   }
-  return CURLE_OK;
+
+out:
+  return result;
 }
 
 bool Curl_req_sendbuf_empty(struct Curl_easy *data)

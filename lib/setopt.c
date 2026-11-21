@@ -222,9 +222,7 @@ static CURLcode httpauth(struct Curl_easy *data, bool proxy,
     }
 
     /* switch off bits we cannot support */
-#ifndef USE_NTLM
     auth &= ~CURLAUTH_NTLM; /* no NTLM support */
-#endif
 #ifndef USE_SPNEGO
     auth &= ~CURLAUTH_NEGOTIATE; /* no Negotiate (SPNEGO) auth without GSS-API
                                     or SSPI */
@@ -430,6 +428,10 @@ static CURLcode setopt_long_bool(struct Curl_easy *data, CURLoption option,
     s->http09_allowed = enabled;
     break;
 #ifndef CURL_DISABLE_COOKIES
+  case CURLOPT_COOKIECONTEXT:
+    s->cookie_navigation = !!(arg & CURLCOOKIE_NAVIGATION);
+    break;
+
   case CURLOPT_COOKIESESSION:
     /*
      * Set this option to TRUE to start a new "cookie session". It will
@@ -1229,6 +1231,7 @@ static CURLcode setopt_long_misc(struct Curl_easy *data, CURLoption option,
         if(!data->hsts)
           return CURLE_OUT_OF_MEMORY;
       }
+      data->hsts->flags = (unsigned int)arg;
     }
     else if(!data->share || !data->share->hsts) {
       /* throw away the HSTS cache unless shared */
@@ -1538,11 +1541,12 @@ static CURLcode cookielist(struct Curl_easy *data, const char *ptr)
       result = Curl_cookie_add(data, data->cookies, ptr + 11,
                                NULL, NULL,
                                COOKIE_HTTPHEADER | COOKIE_SECURE |
-                               COOKIE_NOPSL);
+                               COOKIE_NOPSL | COOKIE_LIVE);
     else
       /* Netscape format line */
       result = Curl_cookie_add(data, data->cookies, ptr, NULL,
-                               NULL, COOKIE_SECURE | COOKIE_NOPSL);
+                               NULL, COOKIE_SECURE | COOKIE_NOPSL |
+                               COOKIE_LIVE);
     Curl_share_unlock(data, CURL_LOCK_DATA_COOKIE);
   }
   return result;
@@ -2102,6 +2106,15 @@ static CURLcode setopt_cptr_http_mqtt(struct Curl_easy *data,
      * Cookie string to send to the remote server in the request.
      */
     return Curl_setstropt(data, STRING_COOKIE, ptr);
+
+  case CURLOPT_COOKIESITE:
+    /*
+     * The site this request is made for, used to evaluate SameSite and
+     * Partitioned cookies: "http://host" or "https://host"
+     */
+    if(ptr && !Curl_cookie_site_ok(ptr))
+      return CURLE_BAD_FUNCTION_ARGUMENT;
+    return Curl_setstropt(data, STRING_COOKIESITE, ptr);
 
   case CURLOPT_COOKIEFILE:
     return cookiefile(data, ptr);

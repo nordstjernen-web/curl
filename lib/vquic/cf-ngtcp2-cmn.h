@@ -58,6 +58,7 @@
 #include <nghttp3/nghttp3.h>
 
 #include "http1.h"
+#include "vquic/ngtcp2_shim.h"
 #include "u32_ptrset.h"
 #include "vtls/vtls.h"
 #include "vquic/vquic_int.h"
@@ -68,7 +69,11 @@ struct Curl_easy;
 struct cf_ngtcp2_ctx;
 struct cf_quic_ctx;
 
-#define QUIC_MAX_STREAMS       (256 * 1024)
+/* The max number of uni-directional streams the server is allowed
+ * to open to us. For HTTP/3, this is 3 for QPACK) */
+#define QUIC_UNI_STREAM_MAX         3
+#define QUIC_UNI_STREAM_WIN_SIZE   (64 * 1024)
+
 #define QUIC_HANDSHAKE_TIMEOUT (10 * NGTCP2_SECONDS)
 #define QUIC_TUNNEL_INBUF_SIZE (64 * 1024)
 
@@ -112,7 +117,7 @@ struct cf_ngtcp2_ctx {
   ngtcp2_crypto_ossl_ctx *ossl_ctx;
 #endif
   ngtcp2_path connected_path;
-  ngtcp2_conn *qconn;
+  struct curl_ngtcp2 qconn;
   ngtcp2_cid dcid;
   ngtcp2_cid scid;
   uint32_t version;
@@ -169,7 +174,6 @@ struct h3_stream_ctx {
   struct bufq sendbuf;          /* h3 request body */
   struct h1_req_parser h1;      /* h1 request parsing */
   uint64_t error3;              /* HTTP/3 stream error code */
-  curl_off_t upload_left;       /* number of request bytes left to upload */
   curl_off_t rx_total;          /* total number of bytes received */
   uint64_t rx_offset;           /* current receive offset */
   uint64_t rx_offset_max;       /* allowed receive offset */
@@ -181,6 +185,7 @@ struct h3_stream_ctx {
   BIT(resp_hds_complete);       /* we have a complete, final response */
   BIT(closed);                  /* TRUE on stream close */
   BIT(reset);                   /* TRUE on stream reset */
+  BIT(sendbuf_eos);             /* sendbuf contains all there is to send */
   BIT(send_closed);             /* stream is local closed */
   BIT(quic_flow_blocked);       /* stream is blocked by QUIC flow control */
 };

@@ -74,7 +74,14 @@ class TestSSLUse:
         url = f'https://{env.authority_for(env.domain1, proto)}/curltest/sslinfo'
         r = curl.http_get(url=url, alpn_proto=proto)
         assert r.json['HTTPS'] == 'on', f'{r.json}'
-        assert 'SSL_SESSION_ID' in r.json, f'{r.json}'
+        # LibreSSL does not support ClientHello extension "psk_key_exchange_mode".
+        # Without that TLSv1.3 session resumption via pre-shared keys is not allowed.
+        # OpenSSL 4.1 reacts to that in creating to SSL Session object on the server.
+        # Depending on the server build, we may see SESSION_ID or not
+        if env.curl_uses_lib('libressl'):
+            pass
+        else:
+            assert 'SSL_SESSION_ID' in r.json, f'{r.json}'
         assert 'SSL_SESSION_RESUMED' in r.json, f'{r.json}'
         assert r.json['SSL_SESSION_RESUMED'] == 'Initial', f'{r.json}'
 
@@ -435,7 +442,7 @@ class TestSSLUse:
         exp_trace = None
         match_trace = None
         if env.curl_uses_lib('openssl') or env.curl_uses_lib('quictls'):
-            exp_trace = r'.*SSL certificate OpenSSL verify result: certificate has expired.*$'
+            exp_trace = r'.*SSL certificate problem: certificate has expired*$'
         elif env.curl_uses_lib('gnutls'):
             exp_trace = r'.*SSL certificate verification failed: certificate has expired\..*'
         elif env.curl_uses_lib('wolfssl'):
@@ -452,12 +459,14 @@ class TestSSLUse:
     def test_17_15_session_export(self, env: Env, httpd):
         proto = 'http/1.1'
         if env.curl_uses_lib('libressl'):
-            pytest.skip('Libressl resumption does not work inTLSv1.3')
+            pytest.skip('Libressl resumption does not work in TLSv1.3')
         if env.curl_uses_lib('rustls-ffi'):
             pytest.skip('rustsls does not expose sessions')
         if env.curl_uses_lib('mbedtls') and \
            not env.curl_lib_version_at_least('mbedtls', '3.6.0'):
             pytest.skip('mbedtls TLSv1.3 session resume not working before 3.6.0')
+        if not env.curl_has_sha256():
+            pytest.skip(reason="curl built without SHA-256")
         run_env = os.environ.copy()
         run_env['CURL_DEBUG'] = 'ssl,ssls'
         # clean session file first, then reuse

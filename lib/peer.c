@@ -126,7 +126,7 @@ static CURLcode peer_create(struct peer_parse *pp,
     goto out;
   }
 
-  peer->refcount = 1;
+  Curl_refcount_init(&peer->refcount, 1);
   peer->scheme = pp->scheme;
   peer->hostname = peer->user_hostname;
   peer->port = pp->port;
@@ -302,8 +302,9 @@ void Curl_peer_link(struct Curl_peer **pdest, struct Curl_peer *src)
     Curl_peer_unlink(pdest);
     *pdest = src;
     if(src) {
-      DEBUGASSERT(src->refcount < UINT32_MAX);
-      src->refcount++;
+      uint32_t newcount = Curl_refcount_incr(&src->refcount);
+      (void)newcount;
+      DEBUGASSERT(newcount < UINT32_MAX);
     }
   }
 }
@@ -312,14 +313,15 @@ void Curl_peer_unlink(struct Curl_peer **ppeer)
 {
   if(*ppeer) {
     struct Curl_peer *peer = *ppeer;
+    uint32_t newcount;
 
-    DEBUGASSERT(peer->refcount);
     *ppeer = NULL;
-    if(peer->refcount)
-      peer->refcount--;
-    if(!peer->refcount) {
+
+    newcount = Curl_refcount_decr(&peer->refcount);
+    DEBUGASSERT(newcount < UINT32_MAX); /* wraparound check */
+
+    if(!newcount)
       curlx_free(peer);
-    }
   }
 }
 
@@ -676,7 +678,7 @@ CURLcode Curl_peer_from_proxy_url(CURLU *uh,
     goto out;
   }
 
-  uc = curl_url_get(uh, CURLUPART_PORT, &portptr, CURLU_NO_DEFAULT_PORT);
+  uc = curl_url_get(uh, CURLUPART_PORT, &portptr, 0);
   if(uc == CURLUE_OUT_OF_MEMORY) {
     result = CURLE_OUT_OF_MEMORY;
     goto out;
@@ -690,11 +692,13 @@ CURLcode Curl_peer_from_proxy_url(CURLU *uh,
     curlx_free(portptr);
   }
   else {
-    /* No port in URL, take the set one or the scheme's default */
+    /* No port in URL, take the set one or the proxy default */
     if(data->set.proxyport)
       pp.port = data->set.proxyport;
+    else if(CURL_PROXY_IS_HTTPS(proxytype))
+      pp.port = CURL_DEFAULT_HTTPS_PROXY_PORT;
     else
-      pp.port = pp.scheme->defport;
+      pp.port = CURL_DEFAULT_PROXY_PORT;
   }
 
   /* now, clone the proxy hostname */
